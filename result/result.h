@@ -407,7 +407,7 @@ public:
 
     constexpr T&& unwrap() {
         if(!is_ok()) {
-            details::terminate("Called `unwrap` on a Err value");
+            details::terminate("Called `unwrap` on an Err value");
         }
         return std::move(*this).ok_unchecked();
     }
@@ -419,18 +419,47 @@ public:
     }
     constexpr T&& unwrap_or_default() {
         static_assert(std::is_default_constructible<T>::value,
-                "`unwrap_or_default` requires T to be default constructable");
+                "`unwrap_or_default` requires T to be default constructible");
         if(!is_ok()) {
             return T();
         }
         return std::move(*this).ok_unchecked();
+    }
+    constexpr E&& unwrap_err() {
+        if(!is_err()) {
+            details::terminate("Called `unwrap_err` on an Err value");
+        }
+        return std::move(*this).err_unchecked();
+    }
+    constexpr E&& unwrap_err_or(E && error) {
+        if(!is_err()) {
+            return error;
+        }
+        return std::move(*this).err_unchecked();
+    }
+    constexpr E&& unwrap_err_or_default() {
+        static_assert(std::is_default_constructible<T>::value,
+                "`unwrap_err_or_default` requires E to be default "
+                "constructible");
+        if(!is_err()) {
+            return E();
+        }
+        return std::move(*this).err_unchecked();
     }
 
     constexpr T&& expect(const std::string_view& message) {
         if(!is_ok()) {
             details::terminate(message);
         }
-        return std::move(m_storage).template get<T>();
+        return std::move(*this).ok_unchecked();
+        ;
+    }
+    constexpr E&& expect_err(const std::string_view& message) {
+        if(!is_err()) {
+            details::terminate(message);
+        }
+        return std::move(*this).err_unchecked();
+        ;
     }
 
     // }}}
