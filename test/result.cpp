@@ -164,3 +164,12 @@ TEST_CASE("Result combinators and adapters", "[result]") {
         }
     }
 }
+
+TEST_CASE("Hash", "[result]") {
+    auto result = Result<int, std::string>(Ok(5));
+    auto result2 = Result<int, std::string>(Err("cat"s));
+    REQUIRE(std::hash<Result<int, std::string>>()(result) ==
+            std::hash<int>()(result.unwrap()));
+    REQUIRE(std::hash<Result<int, std::string>>()(result2) ==
+            std::hash<std::string>()("cat"s));
+}
