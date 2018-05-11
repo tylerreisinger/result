@@ -1,9 +1,12 @@
 # result
-A C++17 implementation of the "value or error" type Result&lt;T, E>.
+A C++17 implementation of the "value or error" type Result<T, E>.
 
 ## Overview
 
-`Result` is a class for communicating errors in a safe and visible manner. It is a sum type containing either a value
+
+`Result` is an adaptation of the [std::result::Result](https://doc.rust-lang.org/std/result/enum.Result.html) type from
+the Rust programming language to C++.
+It is a class for communicating errors in a safe and visible manner. It is a sum type containing either a value
 of type T or an error of type E and can be chained together or transformed easily.
 
 Unlike exceptions, which are by
@@ -17,6 +20,8 @@ or, if an error occured, an arbitrary object describing the error transparently.
 
 `Result` is an adaptation of the [std::result::Result](https://doc.rust-lang.org/std/result/enum.Result.html) type from
 the Rust programming language to C++.
+
+**result** does not have any dependencies other than a C++17 compliant compiler.
 
 ## Example
 
@@ -59,6 +64,13 @@ int main() {
 
 ## Details
 
+**result** is designed to be very fast and flexible.
+
+* **Fast** -- `Result` favors move semantics heavily and tries to prevent copying in/out of a `Result` 
+ as much as possible. It takes callback functions as template arguments for easy inlining.
+* **Flexible** -- `Result` is mostly `constexpr` friendly with helper functions that can be utilized with
+ many different styles.
+
 ### Construction, and the wrapper types `Ok` and `Err`
 
 `Ok<T>` and `Err<T>` are light wrappers over a value of type `T`. They are the most common way to construct
@@ -84,7 +96,7 @@ To obtain the value inside the `Result`, there are a few methods:
 * `Result::unwrap()` and `Result::unwrap_err()`
   
   These methods return, by *moved value*, the `Ok` or `Err` object, respectively. If the `Result` does not contain
-  the requested type, then the function *errors*, which by default calls std::terminate() and prints out a message.
+  the requested type, then the function *errors*, which by default calls `std::terminate()` and prints out a message.
   Thus, these functions should be used only when it is known what the `Result` contains, or when the error is unable
   to be handled. Note that since this moves out of the `Result`, the `Result` should not be used afterward.
   
@@ -214,3 +226,33 @@ To obtain the value inside the `Result`, there are a few methods:
   
   This allows short circuiting like `and_then` does. If the first result is `Ok` then the function will never be
   evaluated, otherwise it will be evaluated once and the result returned.
+  
+### `unit_t`
+
+  Use of `void` in templates can cause issues as it does not behave like a normal type and requires a lot of
+  `enable_if`s and template specializations to make work, yet a `Result<void, E>` type is useful in many situations.
+  To facilitate this idea, `unit_t` is a unit struct defined by **result** that is trivially constructable, holds no
+  data, and is always equal to any other `unit_t`. A `Result<unit_t, E>` behaves just like the void one should,
+  but without the headache. To construct such a `Result`, you can use `Result<unit_t, E>(Ok());`.
+  
+  Note that `Result` cannot have a `unit_t` error type. If you want a "null" error, use `std::optional<T>` instead.
+
+### Other Niceties
+
+ The `Result` type has a few other utility features that ease its use: 
+ 
+ * It overloads all the standard comparison operators, allowing Result objects to be compared like their containing
+   value, while placing all errors at the end.
+ * It overloads std::hash for hashable types, allowing it to be placed into a hash table.
+ * Overloads for operator << are provided on most of the defined types.
+ 
+ 
+### Performance Considerations
+
+ **result** was designed to maximize reliance on move semantics and minimize all unnecessary copying. `clone` is 
+ the only member function that should copy the `Result` or any of its components. Additionally, all sensible functions
+ are marked `constexpr` and `Result` should be usable within other `constexpr` functions.
+ 
+ Memory-wise, the memory required by `Result<T, E>` is equal to `max(sizeof(T), sizeof(E))+1`, however it will be
+ aligned based on the highest alignment requirement. While a `Result<char, char>` should have a size of 2,
+ `Result<int, int>` might have an aligned size of 8.
