@@ -1,12 +1,14 @@
 #define CATCH_CONFIG_MAIN
 
 #include <iostream>
+#include <string>
 
 #include <catch/catch.hpp>
 
 #include "result/result.h"
 
 using namespace result;
+using namespace std::literals::string_literals;
 
 TEST_CASE("Result construction", "[result]") {
     SECTION("Ok value construction -- same types") {
@@ -78,10 +80,16 @@ TEST_CASE("Result copy/move", "[result]") {
             auto result1 = Result<std::string, double>(Ok(str));
             auto result2 = std::move(result1);
 
+            REQUIRE(result1 != Ok(str));
             REQUIRE(result2 == Ok(str));
         }
     }
 }
+
+double times2(double x) { return x * 2.0; }
+struct times2_t {
+    double operator()(double x) { return x * 2.0; }
+};
 
 TEST_CASE("Result combinators and adapters", "[result]") {
     SECTION("map") {
@@ -90,8 +98,69 @@ TEST_CASE("Result combinators and adapters", "[result]") {
             auto result2 = result1.map([](const auto&) { return 2.5; });
 
             REQUIRE(result2 == Ok(2.5));
-            REQUIRE(result2.map([](const auto& x) { return x * 2.0; }) ==
-                    Ok(5.0));
+            REQUIRE(result2.clone().map(
+                            [](const auto& x) { return x * 2.0; }) == Ok(5.0));
+            REQUIRE(result2.clone().map(times2) == Ok(5.0));
+            REQUIRE(result2.clone().map(times2_t()) == Ok(5.0));
+            REQUIRE(result2.clone().map(std::function(times2_t())) == Ok(5.0));
+        }
+        {
+            auto result1 = Result<int, std::string>(Err(std::string("test")));
+
+            REQUIRE(result1.map([](const auto&) { return 5; }) ==
+                    Err(std::string("test")));
+        }
+    }
+    SECTION("map_err") {
+        {
+            auto result1 = Result<int, std::string>(Err(std::string("dog")));
+            auto result2 = Result<int, std::string>(Ok(5));
+
+            REQUIRE(result1.map_err([](auto) { return std::string("cat"); }) ==
+                    Err(std::string("cat")));
+            REQUIRE(result2.map_err([](auto) { return std::string("cat"); }) ==
+                    Ok(5));
+        }
+    }
+    SECTION("and") {
+        {
+            REQUIRE(Result<int, int>(Ok(5)).and_(
+                            Result<double, int>(Ok(2.5))) == Ok(2.5));
+            REQUIRE(Result<int, int>(Err(5)).and_(
+                            Result<double, int>(Ok(2.5))) == Err(5));
+        }
+    }
+    SECTION("and_then") {
+        {
+            REQUIRE(Result<int, int>(Ok(5)).and_then([](auto) {
+                return Result<double, int>(Ok(2.5));
+            }) == Ok(2.5));
+            REQUIRE(Result<int, int>(Err(5)).and_then([](auto) {
+                return Result<double, int>(Ok(2.5));
+            }) == Err(5));
+            REQUIRE(Result<int, std::string>(Err("cat"s)).and_then([](auto) {
+                return Result<double, std::string>(Ok(2.5));
+            }) == Err("cat"s));
+        }
+    }
+    SECTION("or") {
+        {
+            REQUIRE(Result<int, int>(Ok(5)).or_(Result<int, int>(Ok(2))) ==
+                    Ok(5));
+            REQUIRE(Result<int, int>(Err(5)).or_(Result<int, double>(Ok(3))) ==
+                    Ok(3));
+            REQUIRE(Result<int, int>(Err(5)).or_(
+                            Result<int, double>(Err(10.0))) == Err(10.0));
+        }
+    }
+    SECTION("or_else") {
+        {
+            REQUIRE(Result<int, std::string>(Err("cat"s)).or_else([](auto) {
+                return Result<int, int>(Ok(5));
+            }) == Ok(5));
+            REQUIRE(Result<int, std::string>(Ok(20)).or_else([](auto) {
+                return Result<int, std::string>(Ok(5));
+            }) == Ok(20));
         }
     }
 }

@@ -24,6 +24,9 @@ enum class ResultKind : uint8_t {
     Err = 1,
 };
 
+template <typename T, typename E>
+class[[nodiscard]] Result;
+
 struct ok_tag_t {};
 struct err_tag_t {};
 struct unit_t {};
@@ -31,6 +34,12 @@ struct unit_t {};
 inline constexpr ok_tag_t ok_tag = ok_tag_t{};
 inline constexpr err_tag_t err_tag = err_tag_t{};
 inline constexpr unit_t unit = unit_t{};
+
+template <typename T>
+struct is_result : std::false_type {};
+
+template <typename T, typename E>
+struct is_result<Result<T, E>> : std::true_type {};
 
 template <typename T>
 class Err {
@@ -222,6 +231,8 @@ public:
     constexpr Result(Result<T, E>&& other) = default;
     constexpr Result<T, E>& operator=(Result<T, E>&& other) = default;
 
+    constexpr Result<T, E> clone() const { return *this; }
+
     constexpr bool is_ok() const { return m_storage.kind() == ResultKind::Ok; }
     constexpr bool is_err() const {
         return m_storage.kind() == ResultKind::Err;
@@ -381,18 +392,75 @@ public:
         return m_storage.template get<E>();
     }
 
-    // Combinators and adapters
+    // ===== Combinators and adapters ===== {{{
     template <typename F,
-            typename T2 = std::invoke_result_t<F, const T&>,
-            std::enable_if_t<std::is_invocable_r<T2, F, const T&>::value, int> =
-                    0>
+            typename T2 = std::invoke_result_t<F, T>,
+            std::enable_if_t<std::is_invocable_r<T2, F, T>::value, int> = 0>
     Result<T2, E> map(F && map_fn) const {
         if(is_ok()) {
-            return Result<T2, E>(Ok(map_fn(ok_unchecked())));
+            return Result<T2, E>(
+                    Ok(map_fn(std::move(m_storage).template get<T>())));
         } else {
-            return Result<T2, E>(Err(err_unchecked()));
+            return Result<T2, E>(Err(std::move(m_storage).template get<E>()));
         }
     }
+
+    template <typename F,
+            typename E2 = std::invoke_result_t<F, E>,
+            std::enable_if_t<std::is_invocable_r<E2, F, E>::value, int> = 0>
+    Result<T, E2> map_err(F && map_fn) {
+        if(is_ok()) {
+            return Result<T, E2>(Ok(std::move(m_storage).template get<T>()));
+        } else {
+            return Result<T, E2>(
+                    Err(map_fn(std::move(m_storage).template get<E>())));
+        }
+    }
+
+    template <typename T2>
+    Result<T2, E> and_(Result<T2, E> other) {
+        if(is_ok()) {
+            return other;
+        } else {
+            return Result<T2, E>(Err(std::move(m_storage).template get<E>()));
+        }
+    }
+
+    template <typename F,
+            typename T2 = typename std::invoke_result_t<F, T>::value_type,
+            std::enable_if_t<std::is_invocable_r<Result<T2, E>, F, T>::value,
+                    int> = 0>
+    Result<T2, E> and_then(F && fn) {
+        if(is_ok()) {
+            return fn(std::move(m_storage).template get<T>());
+        } else {
+            return Result<T2, E>(Err(std::move(m_storage).template get<E>()));
+        }
+    }
+
+    template <typename E2>
+    Result<T, E2> or_(Result<T, E2> other) {
+        if(is_err()) {
+            return other;
+        } else {
+            return Result<T, E2>(Ok(std::move(m_storage).template get<T>()));
+        }
+    }
+
+    template <typename F,
+            typename E2 = typename std::invoke_result_t<F, E>::error_type,
+            std::enable_if_t<std::is_invocable_r<Result<T, E2>, F, E>::value,
+                    int> = 0>
+    Result<T, E2> or_else(F && fn) {
+        if(is_err()) {
+            return fn(std::move(m_storage).template get<E>());
+        } else {
+            return Result<T, E2>(Ok(std::move(m_storage).template get<T>()));
+        }
+    }
+
+
+    // }}}
 
 private:
     details::ResultStorage<T, E> m_storage;
