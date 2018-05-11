@@ -37,8 +37,8 @@ TEST_CASE("Result construction", "[result]") {
         REQUIRE(result == Err(std::string("Hello world")));
         REQUIRE(result != Ok(5));
     }
-    SECTION("Ok with void type") {
-        auto result = Result<void, int>(Ok());
+    SECTION("Ok with unit type") {
+        auto result = Result<unit_t, int>(Ok());
 
         REQUIRE(result.is_err() == false);
         REQUIRE(result.is_ok() == true);
@@ -79,6 +79,19 @@ TEST_CASE("Result copy/move", "[result]") {
             auto result2 = std::move(result1);
 
             REQUIRE(result2 == Ok(str));
+        }
+    }
+}
+
+TEST_CASE("Result combinators and adapters", "[result]") {
+    SECTION("map") {
+        {
+            auto result1 = Result<int, int>(Ok(5));
+            auto result2 = result1.map([](const auto&) { return 2.5; });
+
+            REQUIRE(result2 == Ok(2.5));
+            REQUIRE(result2.map([](const auto& x) { return x * 2.0; }) ==
+                    Ok(5.0));
         }
     }
 }

@@ -24,6 +24,14 @@ enum class ResultKind : uint8_t {
     Err = 1,
 };
 
+struct ok_tag_t {};
+struct err_tag_t {};
+struct unit_t {};
+
+inline constexpr ok_tag_t ok_tag = ok_tag_t{};
+inline constexpr err_tag_t err_tag = err_tag_t{};
+inline constexpr unit_t unit = unit_t{};
+
 template <typename T>
 class Err {
 public:
@@ -38,14 +46,6 @@ public:
 
 private:
     T m_value;
-};
-
-template <>
-class Err<void> {
-public:
-    using value_type = void;
-
-    constexpr Err() = default;
 };
 
 template <typename T>
@@ -65,14 +65,17 @@ private:
 };
 
 template <>
-class Ok<void> {
+class Ok<unit_t> {
 public:
-    using value_type = void;
+    using value_type = unit_t;
 
     constexpr Ok() = default;
+    constexpr Ok(unit_t) {}
+
+    constexpr const unit_t value() const { return {}; }
 };
 
-Ok()->Ok<void>;
+Ok()->Ok<unit_t>;
 
 
 namespace details {
@@ -95,7 +98,9 @@ public:
     ResultStorage() = delete;
 
     constexpr ResultStorage(Ok<T> val) {
-        new(&m_data) DecayT(std::move(val).value());
+        if constexpr(!std::is_same<T, unit_t>::value) {
+            new(&m_data) DecayT(std::move(val).value());
+        }
         m_tag = ResultKind::Ok;
     }
     constexpr ResultStorage(Err<E> val) {
@@ -105,14 +110,18 @@ public:
 
     constexpr ResultStorage(const ResultStorage<T, E>& rhs) : m_tag(rhs.m_tag) {
         if(kind() == ResultKind::Ok) {
-            new(&m_data) DecayT(rhs.get<T>());
+            if constexpr(!std::is_same<T, unit_t>::value) {
+                new(&m_data) DecayT(rhs.get<T>());
+            }
         } else {
             new(&m_data) DecayE(rhs.get<E>());
         }
     }
     constexpr ResultStorage(ResultStorage<T, E>&& rhs) : m_tag(rhs.m_tag) {
         if(kind() == ResultKind::Ok) {
-            new(&m_data) DecayT(std::move(rhs).template get<T>());
+            if constexpr(!std::is_same<T, unit_t>::value) {
+                new(&m_data) DecayT(std::move(rhs).template get<T>());
+            }
         } else {
             new(&m_data) DecayE(std::move(rhs).template get<E>());
         }
@@ -178,91 +187,18 @@ private:
     ResultKind m_tag;
 };
 
-template <typename E>
-class ResultStorage<void, E> {
-public:
-    using data_type = std::aligned_union_t<1, E>;
-    using DecayE = std::decay_t<E>;
-
-    constexpr ResultStorage(Ok<void>) { m_tag = ResultKind::Ok; }
-    constexpr ResultStorage(Err<E> val) {
-        new(&m_data) DecayE(std::move(val).value());
-        m_tag = ResultKind::Err;
-    }
-
-    constexpr ResultStorage(const ResultStorage<void, E>& rhs)
-        : m_tag(rhs.m_tag) {
-        if(kind() == ResultKind::Err) {
-            new(&m_data) DecayE(rhs.get<E>());
-        }
-    }
-    constexpr ResultStorage(ResultStorage<void, E>&& rhs) : m_tag(rhs.m_tag) {
-        if(kind() == ResultKind::Err) {
-            new(&m_data) DecayE(std::move(rhs).template get<E>());
-        }
-    }
-    constexpr ResultStorage& operator=(const ResultStorage<void, E>& rhs) {
-        destroy();
-        m_tag = rhs.m_tag;
-
-        if(kind() == ResultKind::Err) {
-            E& val = get<E>();
-            val = rhs.get<E>();
-        }
-    }
-    constexpr ResultStorage& operator=(ResultStorage<void, E>&& rhs) {
-        destroy();
-        m_tag = rhs.m_tag;
-
-        if(kind() == ResultKind::Err) {
-            E& val = get<E>();
-            val = std::move(rhs).template get<E>();
-        }
-    }
-
-    template <typename U>
-    constexpr const U& get() const& {
-        static_assert(std::is_same<E, U>::value);
-        assert(m_tag == ResultKind::Err);
-        return *reinterpret_cast<const U*>(&m_data);
-    }
-    template <typename U>
-    constexpr U& get() & {
-        static_assert(std::is_same<E, U>::value);
-        assert(m_tag == ResultKind::Err);
-        return *reinterpret_cast<U*>(&m_data);
-    }
-    template <typename U>
-    constexpr U&& get() && {
-        static_assert(std::is_same<E, U>::value);
-        assert(m_tag == ResultKind::Err);
-        return std::move(*reinterpret_cast<U*>(&m_data));
-    }
-
-    constexpr ResultKind kind() const { return m_tag; }
-
-    ~ResultStorage() { destroy(); }
-
-private:
-    void destroy() {
-        if(m_tag == ResultKind::Err) {
-            get<E>().~E();
-        }
-    }
-
-    data_type m_data;
-    ResultKind m_tag;
-};
-
-
 } // namespace details
 
 template <typename T, typename E>
-class Result {
+class [[nodiscard]] Result {
 public:
     using value_type = T;
     using error_type = E;
 
+    static_assert(!std::is_same<T, void>::value,
+            "Cannot create a Result<T, E> object with T=void. "
+            "Introducing `void` to the type causes a lot of problems, "
+            "use the type `unit_t` instead");
     static_assert(!std::is_same<E, void>::value,
             "Cannot create a Result<T, E> object with E=void. You want an "
             "optional<T>.");
@@ -276,6 +212,11 @@ public:
     constexpr Result(Ok<T> value) : m_storage(std::move(value)) {}
     constexpr Result(Err<E> value) : m_storage(std::move(value)) {}
 
+    template <typename... Args>
+    constexpr Result(ok_tag_t, Args... args) : Result(Ok(args...)) {}
+    template <typename... Args>
+    constexpr Result(err_tag_t, Args... args) : Result(Err(args...)) {}
+
     constexpr Result(const Result<T, E>& other) = default;
     constexpr Result<T, E>& operator=(const Result<T, E>& other) = default;
     constexpr Result(Result<T, E>&& other) = default;
@@ -288,7 +229,7 @@ public:
     constexpr ResultKind kind() const { return m_storage.kind(); }
 
     constexpr bool operator==(const Ok<T>& other) const {
-        if constexpr(std::is_same<T, void>::value) {
+        if constexpr(std::is_same<T, unit_t>::value) {
             return true;
         } else {
             return kind() == ResultKind::Ok &&
@@ -310,7 +251,7 @@ public:
             return false;
         }
         if(kind() == ResultKind::Ok) {
-            if constexpr(std::is_same<T, void>::value) {
+            if constexpr(std::is_same<T, unit_t>::value) {
                 return true;
             } else {
                 return m_storage.template get<T>() ==
@@ -326,33 +267,21 @@ public:
         return !(*this == other);
     }
 
-    template <typename U = T,
-            std::enable_if_t<!std::is_same<U, void>::value &&
-                            std::is_same<T, U>::value,
-                    int> = 0>
-    constexpr optional<std::reference_wrapper<const U>> ok() const& {
+    constexpr optional<std::reference_wrapper<const T>> ok() const& {
         if(is_ok()) {
             return std::cref(m_storage.template get<T>());
         } else {
             return nullopt;
         }
     }
-    template <typename U = T,
-            std::enable_if_t<!std::is_same<U, void>::value &&
-                            std::is_same<T, U>::value,
-                    int> = 0>
-    constexpr optional<std::reference_wrapper<U>> ok() & {
+    constexpr optional<std::reference_wrapper<T>> ok()& {
         if(is_ok()) {
             return std::ref(m_storage.template get<T>());
         } else {
             return nullopt;
         }
     }
-    template <typename U = T,
-            std::enable_if_t<!std::is_same<U, void>::value &&
-                            std::is_same<T, U>::value,
-                    int> = 0>
-    constexpr optional<U> ok() && {
+    constexpr optional<T> ok()&& {
         if(is_ok()) {
             return std::move(m_storage.template get<T>());
         } else {
@@ -393,11 +322,7 @@ public:
         }
         return m_storage.template get<E>();
     }
-    template <typename U = T,
-            std::enable_if_t<!std::is_same<U, void>::value &&
-                            std::is_same<T, U>::value,
-                    int> = 0>
-    constexpr const U& try_ok() const {
+    constexpr const T& try_ok() const {
         if(!is_ok()) {
             details::terminate("Called try_ok on an Err value");
         }
@@ -418,30 +343,54 @@ public:
             std::enable_if_t<!std::is_same<U, void>::value &&
                             std::is_same<T, U>::value,
                     int> = 0>
-    constexpr U unwrap() && {
+    constexpr U&& unwrap() {
         if(!is_ok()) {
             details::terminate("Called unwrap on a Err value");
         }
-        return std::move(m_storage).template get<T>();
+        return std::move(m_storage).template get<U>();
     }
 
     template <typename U = T,
             std::enable_if_t<!std::is_same<U, void>::value &&
                             std::is_same<T, U>::value,
                     int> = 0>
-    constexpr U expect(const std::string& message) && {
+    constexpr U&& expect(const std::string& message) {
         if(!is_ok()) {
             details::terminate(message);
         }
-        return std::move(m_storage).template get<T>();
+        return std::move(m_storage).template get<U>();
     }
     template <typename U = T,
             std::enable_if_t<std::is_same<U, void>::value &&
                             std::is_same<T, U>::value,
                     int> = 0>
-    constexpr void expect(const std::string& message) && {
+    constexpr void expect(const std::string& message) {
         if(!is_ok()) {
             details::terminate(message);
+        }
+    }
+
+    template <typename U = T,
+            std::enable_if_t<!std::is_same<U, void>::value &&
+                            std::is_same<T, U>::value,
+                    int> = 0>
+    constexpr const U& ok_unchecked() const {
+        return m_storage.template get<U>();
+    }
+    constexpr const E& err_unchecked() const {
+        return m_storage.template get<E>();
+    }
+
+    // Combinators and adapters
+    template <typename F,
+            typename T2 = std::invoke_result_t<F, const T&>,
+            std::enable_if_t<std::is_invocable_r<T2, F, const T&>::value, int> =
+                    0>
+    Result<T2, E> map(F && map_fn) const {
+        if(is_ok()) {
+            return Result<T2, E>(Ok(map_fn(ok_unchecked())));
+        } else {
+            return Result<T2, E>(Err(err_unchecked()));
         }
     }
 
@@ -516,8 +465,14 @@ inline constexpr bool operator>=(const Result<T, E>& lhs, Err<E> rhs) {
 }
 
 template <typename T>
-std::ostream& operator<<(std::ostream& stream, const Ok<T>& ok) {
-    if constexpr(std::is_same<T, void>::value) {
+inline std::ostream& operator<<(std::ostream& stream, unit_t) {
+    stream << "()";
+    return stream;
+}
+
+template <typename T>
+inline std::ostream& operator<<(std::ostream& stream, const Ok<T>& ok) {
+    if constexpr(std::is_same<T, unit_t>::value) {
         stream << "Ok()" << std::endl;
     } else {
         stream << "Ok(" << ok.value() << ")";
@@ -525,16 +480,17 @@ std::ostream& operator<<(std::ostream& stream, const Ok<T>& ok) {
     return stream;
 }
 template <typename T>
-std::ostream& operator<<(std::ostream& stream, const Err<T>& err) {
+inline std::ostream& operator<<(std::ostream& stream, const Err<T>& err) {
     stream << "Err(" << err.value() << ")";
     return stream;
 }
 
 template <typename T, typename E>
-std::ostream& operator<<(std::ostream& stream, const Result<T, E>& result) {
+inline std::ostream& operator<<(
+        std::ostream& stream, const Result<T, E>& result) {
     switch(result.kind()) {
     case ResultKind::Ok: {
-        if constexpr(std::is_same<T, void>::value) {
+        if constexpr(std::is_same<T, unit_t>::value) {
             stream << "Ok()";
         } else {
             stream << "Ok(" << result.ok().value() << ")";
@@ -560,5 +516,13 @@ inline std::ostream& operator<<(
 }
 
 } // namespace result
+
+#define PROPAGATE(res)                                                         \
+    {                                                                          \
+        auto& r = res;                                                         \
+        if(r.is_err()) {                                                       \
+            return r;                                                          \
+        }                                                                      \
+    }
 
 #endif
