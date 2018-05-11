@@ -140,7 +140,10 @@ public:
         m_tag = ResultKind::Err;
     }
 
-    constexpr ResultStorage(const ResultStorage<T, E>& rhs) : m_tag(rhs.m_tag) {
+    constexpr ResultStorage(const ResultStorage<T, E>& rhs) noexcept(
+            std::is_nothrow_copy_constructible<T>::value&&
+                    std::is_nothrow_copy_constructible<E>::value)
+        : m_tag(rhs.m_tag) {
         if(kind() == ResultKind::Ok) {
             if constexpr(!std::is_same<T, unit_t>::value) {
                 new(&m_data) DecayT(rhs.get<T>());
@@ -149,7 +152,10 @@ public:
             new(&m_data) DecayE(rhs.get<E>());
         }
     }
-    constexpr ResultStorage(ResultStorage<T, E>&& rhs) : m_tag(rhs.m_tag) {
+    constexpr ResultStorage(ResultStorage<T, E>&& rhs) noexcept(
+            std::is_nothrow_move_constructible<T>::value&&
+                    std::is_nothrow_move_constructible<E>::value)
+        : m_tag(rhs.m_tag) {
         if(kind() == ResultKind::Ok) {
             if constexpr(!std::is_same<T, unit_t>::value) {
                 new(&m_data) DecayT(std::move(rhs).template get<T>());
@@ -158,7 +164,9 @@ public:
             new(&m_data) DecayE(std::move(rhs).template get<E>());
         }
     }
-    constexpr ResultStorage& operator=(const ResultStorage<T, E>& rhs) {
+    constexpr ResultStorage& operator=(const ResultStorage<T, E>& rhs) noexcept(
+            std::is_nothrow_copy_assignable<T>::value&&
+                    std::is_nothrow_copy_assignable<E>::value) {
         destroy();
         m_tag = rhs.m_tag;
 
@@ -170,7 +178,9 @@ public:
             val = rhs.get<E>();
         }
     }
-    constexpr ResultStorage& operator=(ResultStorage<T, E>&& rhs) {
+    constexpr ResultStorage& operator=(ResultStorage<T, E>&& rhs) noexcept(
+            std::is_nothrow_move_assignable<T>::value&&
+                    std::is_nothrow_move_assignable<E>::value) {
         destroy();
         m_tag = rhs.m_tag;
 
@@ -184,22 +194,22 @@ public:
     }
 
     template <typename U>
-    constexpr const U& get() const& {
+    constexpr const U& get() const& noexcept {
         static_assert(std::is_same<T, U>::value || std::is_same<E, U>::value);
         return *reinterpret_cast<const U*>(&m_data);
     }
     template <typename U>
-    constexpr U& get() & {
+            constexpr U& get() & noexcept {
         static_assert(std::is_same<T, U>::value || std::is_same<E, U>::value);
         return *reinterpret_cast<U*>(&m_data);
     }
     template <typename U>
-    constexpr U&& get() && {
+            constexpr U&& get() && noexcept {
         static_assert(std::is_same<T, U>::value || std::is_same<E, U>::value);
         return std::move(*reinterpret_cast<U*>(&m_data));
     }
 
-    constexpr ResultKind kind() const { return m_tag; }
+    constexpr ResultKind kind() const noexcept { return m_tag; }
 
     ~ResultStorage() { destroy(); }
 
@@ -258,22 +268,32 @@ public:
     constexpr Result(err_tag_t, Args && ... args)
         : m_storage(err_tag, std::forward<Args>(args)...) {}
 
-    constexpr Result(const Result<T, E>& other) = default;
-    constexpr Result<T, E>& operator=(const Result<T, E>& other) = default;
-    constexpr Result(Result<T, E>&& other) = default;
-    constexpr Result<T, E>& operator=(Result<T, E>&& other) = default;
+    constexpr Result(const Result<T, E>& other) noexcept(
+            std::is_nothrow_copy_constructible<
+                    details::ResultStorage<T, E>>::value) = default;
+    constexpr Result<T, E>& operator=(const Result<T, E>& other) noexcept(
+            std::is_nothrow_copy_assignable<
+                    details::ResultStorage<T, E>>::value) = default;
+    constexpr Result(Result<T, E> && other) noexcept(
+            std::is_nothrow_move_constructible<
+                    details::ResultStorage<T, E>>::value) = default;
+    constexpr Result<T, E>& operator=(Result<T, E>&& other) noexcept(
+            std::is_nothrow_move_assignable<
+                    details::ResultStorage<T, E>>::value) = default;
 
     constexpr Result<T, E> clone() const { return *this; }
 
-    constexpr bool is_ok() const { return m_storage.kind() == ResultKind::Ok; }
-    constexpr bool is_err() const {
+    constexpr bool is_ok() const noexcept {
+        return m_storage.kind() == ResultKind::Ok;
+    }
+    constexpr bool is_err() const noexcept {
         return m_storage.kind() == ResultKind::Err;
     }
-    constexpr ResultKind kind() const { return m_storage.kind(); }
+    constexpr ResultKind kind() const noexcept { return m_storage.kind(); }
 
-    constexpr operator bool() const { return is_ok(); }
+    constexpr operator bool() const noexcept { return is_ok(); }
 
-    constexpr bool operator==(const Ok<T>& other) const {
+    constexpr bool operator==(const Ok<T>& other) const noexcept {
         if constexpr(std::is_same<T, unit_t>::value) {
             return true;
         } else {
@@ -281,17 +301,17 @@ public:
                     m_storage.template get<T>() == other.value();
         }
     }
-    constexpr bool operator!=(const Ok<T>& other) const {
+    constexpr bool operator!=(const Ok<T>& other) const noexcept {
         return !(*this == other);
     }
-    constexpr bool operator==(const Err<E>& other) const {
+    constexpr bool operator==(const Err<E>& other) const noexcept {
         return kind() == ResultKind::Err &&
                 m_storage.template get<E>() == other.value();
     }
-    constexpr bool operator!=(const Err<E>& other) const {
+    constexpr bool operator!=(const Err<E>& other) const noexcept {
         return !(*this == other);
     }
-    constexpr bool operator==(const Result<T, E>& other) const {
+    constexpr bool operator==(const Result<T, E>& other) const noexcept {
         if(kind() != other.kind()) {
             return false;
         }
@@ -308,7 +328,7 @@ public:
         }
         return false;
     }
-    constexpr bool operator!=(const Result<T, E>& other) const {
+    constexpr bool operator!=(const Result<T, E>& other) const noexcept {
         return !(*this == other);
     }
 
@@ -413,18 +433,22 @@ public:
     // }}}
     // ===== Unsafe accessors ===== {{{
 
-    constexpr const T& ok_unchecked() const& {
+    constexpr const T& ok_unchecked() const& noexcept {
         return m_storage.template get<T>();
     }
-    constexpr const E& err_unchecked() const& {
+    constexpr const E& err_unchecked() const& noexcept {
         return m_storage.template get<E>();
     }
-    constexpr T& ok_unchecked()& { return m_storage.template get<T>(); }
-    constexpr E& err_unchecked()& { return m_storage.template get<E>(); }
-    constexpr T&& ok_unchecked()&& {
+    constexpr T& ok_unchecked() & noexcept {
+        return m_storage.template get<T>();
+    }
+    constexpr E& err_unchecked() & noexcept {
+        return m_storage.template get<E>();
+    }
+    constexpr T&& ok_unchecked() && noexcept {
         return std::move(m_storage).template get<T>();
     }
-    constexpr E&& err_unchecked()&& {
+    constexpr E&& err_unchecked() && noexcept {
         return std::move(m_storage).template get<E>();
     }
 
