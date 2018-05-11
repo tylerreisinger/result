@@ -8,12 +8,13 @@
 #include <type_traits>
 #include <utility>
 
+namespace result {
+
 template <typename T>
 using optional = std::optional<T>;
 using nullopt_t = std::nullopt_t;
 inline constexpr nullopt_t nullopt = std::nullopt;
 
-namespace result {
 
 template <typename T>
 inline std::ostream& operator<<(
@@ -68,6 +69,15 @@ public:
     constexpr const T& value() const& { return m_value; }
     constexpr T&& value() && { return std::move(m_value); }
 
+    template <typename E>
+    constexpr operator Result<T, E>() const& {
+        return Result<T, E>(Ok(m_value));
+    }
+    template <typename E>
+    constexpr operator Result<T, E>() && {
+        return Result<T, E>(Ok(std::move(m_value)));
+    }
+
 
 private:
     T m_value;
@@ -89,7 +99,7 @@ Ok()->Ok<unit_t>;
 
 namespace details {
 
-inline void terminate(const std::string& msg) {
+inline void terminate(const std::string_view& msg) {
     std::cerr << msg << std::endl;
     std::terminate();
 }
@@ -239,6 +249,8 @@ public:
     }
     constexpr ResultKind kind() const { return m_storage.kind(); }
 
+    constexpr operator bool() const { return is_ok(); }
+
     constexpr bool operator==(const Ok<T>& other) const {
         if constexpr(std::is_same<T, unit_t>::value) {
             return true;
@@ -278,44 +290,46 @@ public:
         return !(*this == other);
     }
 
+    // ===== Accessors ===== {{{
+
     constexpr optional<std::reference_wrapper<const T>> ok() const& {
         if(is_ok()) {
-            return std::cref(m_storage.template get<T>());
+            return std::cref(ok_unchecked());
         } else {
             return nullopt;
         }
     }
     constexpr optional<std::reference_wrapper<T>> ok()& {
         if(is_ok()) {
-            return std::ref(m_storage.template get<T>());
+            return std::ref(ok_unchecked());
         } else {
             return nullopt;
         }
     }
     constexpr optional<T> ok()&& {
         if(is_ok()) {
-            return std::move(m_storage.template get<T>());
+            return ok_unchecked();
         } else {
             return nullopt;
         }
     }
     constexpr optional<std::reference_wrapper<const E>> err() const& {
         if(is_err()) {
-            return std::cref(m_storage.template get<E>());
+            return std::cref(err_unchecked());
         } else {
             return nullopt;
         }
     }
     constexpr optional<std::reference_wrapper<E>> err() & {
         if(is_err()) {
-            return std::ref(m_storage.template get<E>());
+            return std::ref(err_unchecked());
         } else {
             return nullopt;
         }
     }
     constexpr optional<E> err() && {
         if(is_err()) {
-            return std::move(std::move(m_storage).template get<E>());
+            return err_unchecked();
         } else {
             return nullopt;
         }
@@ -323,85 +337,85 @@ public:
 
     constexpr const E& try_err() const {
         if(!is_err()) {
-            details::terminate("Called try_err on an Ok value");
+            details::terminate("Called `try_err` on an Ok value");
         }
-        return m_storage.template get<E>();
+        return err_unchecked();
     }
     constexpr E& try_err() {
         if(!is_err()) {
-            details::terminate("Called try_err on an Ok value");
+            details::terminate("Called `try_err` on an Ok value");
         }
-        return m_storage.template get<E>();
+        return err_unchecked();
     }
     constexpr const T& try_ok() const {
         if(!is_ok()) {
-            details::terminate("Called try_ok on an Err value");
+            details::terminate("Called `try_ok` on an Err value");
         }
-        return m_storage.template get<T>();
+        return ok_unchecked();
     }
-    template <typename U = T,
-            std::enable_if_t<!std::is_same<U, void>::value &&
-                            std::is_same<T, U>::value,
-                    int> = 0>
-    constexpr U& try_ok() {
+    constexpr T& try_ok() {
         if(!is_ok()) {
-            details::terminate("Called try_ok on an Err value");
+            details::terminate("Called `try_ok` on an Err value");
         }
-        return m_storage.template get<T>();
+        return ok_unchecked();
     }
 
-    template <typename U = T,
-            std::enable_if_t<!std::is_same<U, void>::value &&
-                            std::is_same<T, U>::value,
-                    int> = 0>
-    constexpr U&& unwrap() {
+    constexpr T&& unwrap() {
         if(!is_ok()) {
-            details::terminate("Called unwrap on a Err value");
+            details::terminate("Called `unwrap` on a Err value");
         }
-        return std::move(m_storage).template get<U>();
+        return std::move(*this).ok_unchecked();
+    }
+    constexpr T&& unwrap_or(T && value) {
+        if(!is_ok()) {
+            return value;
+        }
+        return std::move(*this).ok_unchecked();
+    }
+    constexpr T&& unwrap_or_default() {
+        static_assert(std::is_default_constructible<T>::value,
+                "`unwrap_or_default` requires T to be default constructable");
+        if(!is_ok()) {
+            return T();
+        }
+        return std::move(*this).ok_unchecked();
     }
 
-    template <typename U = T,
-            std::enable_if_t<!std::is_same<U, void>::value &&
-                            std::is_same<T, U>::value,
-                    int> = 0>
-    constexpr U&& expect(const std::string& message) {
+    constexpr T&& expect(const std::string_view& message) {
         if(!is_ok()) {
             details::terminate(message);
         }
-        return std::move(m_storage).template get<U>();
-    }
-    template <typename U = T,
-            std::enable_if_t<std::is_same<U, void>::value &&
-                            std::is_same<T, U>::value,
-                    int> = 0>
-    constexpr void expect(const std::string& message) {
-        if(!is_ok()) {
-            details::terminate(message);
-        }
+        return std::move(m_storage).template get<T>();
     }
 
-    template <typename U = T,
-            std::enable_if_t<!std::is_same<U, void>::value &&
-                            std::is_same<T, U>::value,
-                    int> = 0>
-    constexpr const U& ok_unchecked() const {
-        return m_storage.template get<U>();
+    // }}}
+    // ===== Unsafe accessors ===== {{{
+
+    constexpr const T& ok_unchecked() const& {
+        return m_storage.template get<T>();
     }
-    constexpr const E& err_unchecked() const {
+    constexpr const E& err_unchecked() const& {
         return m_storage.template get<E>();
     }
+    constexpr T& ok_unchecked()& { return m_storage.template get<T>(); }
+    constexpr E& err_unchecked()& { return m_storage.template get<E>(); }
+    constexpr T&& ok_unchecked()&& {
+        return std::move(m_storage).template get<T>();
+    }
+    constexpr E&& err_unchecked()&& {
+        return std::move(m_storage).template get<E>();
+    }
 
+    // }}}
     // ===== Combinators and adapters ===== {{{
     template <typename F,
             typename T2 = std::invoke_result_t<F, T>,
             std::enable_if_t<std::is_invocable_r<T2, F, T>::value, int> = 0>
     Result<T2, E> map(F && map_fn) const {
         if(is_ok()) {
-            return Result<T2, E>(
-                    Ok(map_fn(std::move(m_storage).template get<T>())));
+            return Result<T2, E>(Ok(map_fn(std::move(*this).ok_unchecked())));
         } else {
-            return Result<T2, E>(Err(std::move(m_storage).template get<E>()));
+            return Result<T2, E>(Err(std::move(*this).err_unchecked()));
         }
     }
 
@@ -410,10 +424,9 @@ public:
             std::enable_if_t<std::is_invocable_r<E2, F, E>::value, int> = 0>
     Result<T, E2> map_err(F && map_fn) {
         if(is_ok()) {
-            return Result<T, E2>(Ok(std::move(m_storage).template get<T>()));
+            return Result<T, E2>(Ok(std::move(*this).ok_unchecked()));
         } else {
-            return Result<T, E2>(
-                    Err(map_fn(std::move(m_storage).template get<E>())));
+            return Result<T, E2>(Err(map_fn(std::move(*this).err_unchecked())));
         }
     }
 
@@ -422,7 +435,7 @@ public:
         if(is_ok()) {
             return other;
         } else {
-            return Result<T2, E>(Err(std::move(m_storage).template get<E>()));
+            return Result<T2, E>(Err(std::move(*this).err_unchecked()));
         }
     }
 
@@ -432,9 +445,9 @@ public:
                     int> = 0>
     Result<T2, E> and_then(F && fn) {
         if(is_ok()) {
-            return fn(std::move(m_storage).template get<T>());
+            return fn(std::move(*this).ok_unchecked());
         } else {
-            return Result<T2, E>(Err(std::move(m_storage).template get<E>()));
+            return Result<T2, E>(Err(std::move(*this).err_unchecked()));
         }
     }
 
@@ -443,7 +456,7 @@ public:
         if(is_err()) {
             return other;
         } else {
-            return Result<T, E2>(Ok(std::move(m_storage).template get<T>()));
+            return Result<T, E2>(Ok(std::move(*this).ok_unchecked()));
         }
     }
 
@@ -453,12 +466,11 @@ public:
                     int> = 0>
     Result<T, E2> or_else(F && fn) {
         if(is_err()) {
-            return fn(std::move(m_storage).template get<E>());
+            return fn(std::move(*this).err_unchecked());
         } else {
-            return Result<T, E2>(Ok(std::move(m_storage).template get<T>()));
+            return Result<T, E2>(Ok(std::move(*this).ok_unchecked()));
         }
     }
-
 
     // }}}
 
