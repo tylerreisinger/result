@@ -173,3 +173,9 @@ TEST_CASE("Hash", "[result]") {
     REQUIRE(std::hash<Result<int, std::string>>()(result2) ==
             std::hash<std::string>()("cat"s));
 }
+
+TEST_CASE("Pointer value", "[result]") {
+    int x = 5;
+    auto result = Result<const int*, int>(ok_tag, &x);
+    REQUIRE(result.unwrap() == &x);
+}

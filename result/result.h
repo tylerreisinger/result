@@ -55,7 +55,6 @@ public:
     constexpr const T& value() const& { return m_value; }
     constexpr T&& value() && { return std::move(m_value); }
 
-
 private:
     T m_value;
 };
@@ -79,7 +78,6 @@ public:
     constexpr operator Result<T, E>() && {
         return Result<T, E>(Ok(std::move(m_value)));
     }
-
 
 private:
     T m_value;
@@ -117,6 +115,19 @@ public:
     using data_type = std::aligned_union_t<1, T, E>;
 
     ResultStorage() = delete;
+
+    template <typename... Args>
+    constexpr ResultStorage(ok_tag_t, Args&&... args) {
+        if constexpr(!std::is_same<T, unit_t>::value) {
+            new(&m_data) DecayT(std::forward<Args>(args)...);
+        }
+        m_tag = ResultKind::Ok;
+    }
+    template <typename... Args>
+    constexpr ResultStorage(err_tag_t, Args&&... args) {
+        new(&m_data) DecayE(std::forward<Args>(args)...);
+        m_tag = ResultKind::Err;
+    }
 
     constexpr ResultStorage(Ok<T> val) {
         if constexpr(!std::is_same<T, unit_t>::value) {
@@ -216,6 +227,13 @@ public:
     using value_type = T;
     using error_type = E;
 
+    static_assert(std::is_same<std::remove_reference_t<T>, T>::value,
+            "Result<T, E> cannot store reference types."
+            "Try using `std::reference_wrapper`");
+    static_assert(std::is_same<std::remove_reference_t<E>, E>::value,
+            "Result<T, E> cannot store reference types."
+            "Try using `std::reference_wrapper`");
+
     static_assert(!std::is_same<T, void>::value,
             "Cannot create a Result<T, E> object with T=void. "
             "Introducing `void` to the type causes a lot of problems, "
@@ -234,9 +252,11 @@ public:
     constexpr Result(Err<E> value) : m_storage(std::move(value)) {}
 
     template <typename... Args>
-    constexpr Result(ok_tag_t, Args... args) : Result(Ok(args...)) {}
+    constexpr Result(ok_tag_t, Args && ... args)
+        : m_storage(ok_tag, std::forward<Args>(args)...) {}
     template <typename... Args>
-    constexpr Result(err_tag_t, Args... args) : Result(Err(args...)) {}
+    constexpr Result(err_tag_t, Args && ... args)
+        : m_storage(err_tag, std::forward<Args>(args)...) {}
 
     constexpr Result(const Result<T, E>& other) = default;
     constexpr Result<T, E>& operator=(const Result<T, E>& other) = default;
