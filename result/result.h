@@ -44,6 +44,9 @@ struct is_result : std::false_type {};
 template <typename T, typename E>
 struct is_result<Result<T, E>> : std::true_type {};
 
+inline constexpr bool operator==(unit_t, unit_t) { return true; }
+inline constexpr bool operator!=(unit_t, unit_t) { return false; }
+
 template <typename T>
 class Err {
 public:
